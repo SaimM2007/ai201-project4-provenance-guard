@@ -19,7 +19,7 @@ Pure Python. Measures three things:
 - Type-token ratio (TTR): unique words divided by total words. AI reuses vocabulary more predictably.
 - Punctuation density: ratio of punctuation marks to total characters. Humans use dashes, ellipses, comma splices more freely.
 
-Each of the three sub-measures gets normalized to 0-1 and averaged into one style_score. Higher score = more AI-like (more uniform, less vocab diversity, less punctuation).
+Each of the three sub-measures gets normalized to 0-1 and averaged into one style_score. Higher score means more AI-like (more uniform, less vocab diversity, less punctuation).
 
 Output: a float between 0.0 and 1.0
 
@@ -28,9 +28,9 @@ Blind spots: academic or technical human writing is deliberately uniform and wil
 Weight in final score: 30%
 
 ### Signal 3: Burstiness Score (burst_score) — Ensemble Stretch
-Measures whether sentence length rhythm changes throughout the piece or stays weirdly steady. Splits the text into chunks and measures how much the variance changes chunk to chunk. Low burstiness = steady rhythm = more AI-like.
+Measures whether sentence length rhythm changes throughout the piece or stays weirdly steady. Splits the text into chunks and measures how much the variance changes chunk to chunk. Low burstiness means steady rhythm means more AI-like.
 
-Output: a float between 0.0 and 1.0 (higher = more AI-like, meaning low burstiness)
+Output: a float between 0.0 and 1.0 (higher means more AI-like, meaning low burstiness)
 
 Blind spots: short texts or structured pieces like listicles will have low burstiness even if human written. Poems with intentional repetition will also score weird here.
 
@@ -121,14 +121,14 @@ No automated re-classification happens. A human looks at it and decides.
 ## Anticipated Edge Cases
 
 ### Edge Case 1: Short poems or haiku
-Stylometrics and burstiness both need enough text to produce meaningful stats. A 17 syllable haiku or a 4 line poem gives almost nothing to work with. The scores from signals 2 and 3 will be unreliable, but the system doesnt know that -- it will still combine them and produce a confidence score that looks real but isnt. A formally structured poem will probably get flagged as AI-like even if a human wrote it.
+Stylometrics and burstiness both need enough text to produce meaningful stats. A 17 syllable haiku or a 4 line poem gives almost nothing to work with. The scores from signals 2 and 3 will be unreliable, but the system doesnt know that and will still combine them and produce a confidence score that looks real but isnt. A formally structured poem will probably get flagged as AI-like even if a human wrote it.
 
 Mitigation: if text is under 80 words, the system should down-weight signals 2 and 3 and rely more heavily on the LLM signal. Flag in the response that confidence may be lower than shown for short texts.
 
 ### Edge Case 2: Technical or academic writing by humans
-A human writing a formal essay or documentation will produce text with low sentence variance, high structure, and consistent vocabulary -- which looks exactly like AI output to signals 2 and 3. An engineer writing API docs or a student writing in a strict academic style will likely get flagged as uncertain or AI-like even with perfectly human written content.
+A human writing a formal essay or documentation will produce text with low sentence variance, high structure, and consistent vocabulary which looks exactly like AI output to signals 2 and 3. An engineer writing API docs or a student writing in a strict academic style will likely get flagged as uncertain or AI-like even with perfectly human written content.
 
-Mitigation: this is partly why the "high confidence AI" threshold is set at 0.80. Academic writing might push someone to 0.65-0.75 which lands in the uncertain label, not the AI label. The appeals path handles the rest.
+Mitigation: this is partly why the "high confidence AI" threshold is set at 0.80. Academic writing might push someone to 0.65 to 0.75 which lands in the uncertain label, not the AI label. The appeals path handles the rest.
 
 ### Edge Case 3: AI text that was heavily edited by a human
 Someone generates text with AI then spends an hour editing it, adding personal anecdotes, fixing the rhythm, changing vocab. At that point is it AI content? The system will probably score it somewhere in the uncertain range because the editing introduced human-like variance. This is genuinely ambiguous and the system should not pretend otherwise.
@@ -160,7 +160,7 @@ flowchart TD
     Q --> R[Response\ndetection breakdown, appeal rate, avg confidence]
 ```
 
-Submission flow: text comes in, hits the rate limiter, runs through all three signals, gets combined into a confidence score, maps to a label, gets logged, and the response goes back to the caller with everything they need including the content_id for appeals.
+Submission flow: text comes in, hits the rate limiter, runs through all three signals, gets combined into a confidence score, maps to a label, gets logged, and the response goes back to the caller with the content_id for appeals.
 
 Appeal flow: creator sends their content_id and reason, system looks up the original decision, flips the status to under_review, logs the appeal next to the original entry, and confirms back to the caller.
 
@@ -176,14 +176,14 @@ Verify by: calling the endpoint with 3 test inputs (one obviously AI, one obviou
 ### M4: Second + Third Signal + Confidence Scoring
 Spec sections to provide: Detection Signals (Signals 2 and 3), Uncertainty Representation section, Architecture diagram
 Ask for: stylometrics function, burstiness function, and the confidence scorer that combines all three with the documented weights
-Verify by: checking that a clearly AI input scores above 0.65 and a clearly human input scores below 0.35 -- if both land in the middle something is wrong with the weighting or normalization
+Verify by: checking that a clearly AI input scores above 0.65 and a clearly human input scores below 0.35. If both land in the middle something is wrong with the weighting or normalization
 
 ### M5: Production Layer
 Spec sections to provide: Transparency Label Design, Appeals Workflow, Architecture diagram
 Ask for: label generator function, POST /appeal endpoint, GET /log endpoint, rate limiting setup, SQLite audit logger
 Verify by: hitting all three label thresholds with test inputs, submitting an appeal and checking the status changes, and confirming GET /log returns at least 3 entries with all the right fields
 
-### Stretch M: Analytics Dashboard
+### Stretch: Analytics Dashboard
 Spec sections to provide: Architecture diagram, Appeals Workflow, Uncertainty Representation (for the threshold definitions)
 Ask for: GET /analytics endpoint that queries SQLite and returns detection breakdown by verdict, appeal rate as a percentage, and average confidence score across all submissions
 Verify by: submitting a mix of test inputs and appeals first, then checking that the analytics numbers match what you know you submitted
