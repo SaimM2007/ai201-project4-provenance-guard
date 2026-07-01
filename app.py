@@ -326,6 +326,39 @@ def log():
     entries = get_log(int(limit))
     return jsonify({"entries": entries})
 
+@app.route("/analytics", methods=["GET"])
+def analytics():
+    conn = sqlite3.connect("audit.db")
+    c = conn.cursor()
+
+    c.execute("SELECT COUNT(*) FROM audit_log WHERE entry_type = 'classification'")
+    total = c.fetchone()[0]
+
+    c.execute("SELECT attribution, COUNT(*) FROM audit_log WHERE entry_type = 'classification' GROUP BY attribution")
+    breakdown_rows = c.fetchall()
+    breakdown = {row[0]: row[1] for row in breakdown_rows}
+
+    c.execute("SELECT COUNT(DISTINCT content_id) FROM audit_log WHERE entry_type = 'appeal'")
+    appeal_count = c.fetchone()[0]
+
+    c.execute("SELECT AVG(confidence) FROM audit_log WHERE entry_type = 'classification'")
+    avg_confidence = c.fetchone()[0]
+
+    conn.close()
+
+    appeal_rate = round((appeal_count / total * 100), 2) if total > 0 else 0
+
+    return jsonify({
+        "total_submissions": total,
+        "detection_breakdown": {
+            "likely_ai": breakdown.get("likely_ai", 0),
+            "likely_human": breakdown.get("likely_human", 0),
+            "uncertain": breakdown.get("uncertain", 0)
+        },
+        "appeal_rate_percent": appeal_rate,
+        "total_appeals": appeal_count,
+        "average_confidence": round(avg_confidence, 4) if avg_confidence else 0
+    })
 
 if __name__ == "__main__":
     init_db()
