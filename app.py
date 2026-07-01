@@ -2,6 +2,7 @@ import os
 import uuid
 import json
 import sqlite3
+import re
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify
 from flask_limiter import Limiter
@@ -34,6 +35,8 @@ def init_db():
             attribution TEXT,
             confidence REAL,
             llm_score REAL,
+            style_score REAL,
+            burst_score REAL,
             status TEXT,
             entry_type TEXT,
             appeal_reason TEXT
@@ -48,8 +51,8 @@ def write_log(entry):
     c = conn.cursor()
     c.execute("""
         INSERT INTO audit_log 
-        (content_id, creator_id, timestamp, attribution, confidence, llm_score, status, entry_type, appeal_reason)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (content_id, creator_id, timestamp, attribution, confidence, llm_score, style_score, burst_score, status, entry_type, appeal_reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         entry.get("content_id"),
         entry.get("creator_id"),
@@ -57,6 +60,8 @@ def write_log(entry):
         entry.get("attribution"),
         entry.get("confidence"),
         entry.get("llm_score"),
+        entry.get("style_score"),
+        entry.get("burst_score"),
         entry.get("status"),
         entry.get("entry_type", "classification"),
         entry.get("appeal_reason")
@@ -72,7 +77,7 @@ def get_log(limit=20):
     rows = c.fetchall()
     conn.close()
     keys = ["id", "content_id", "creator_id", "timestamp", "attribution",
-            "confidence", "llm_score", "status", "entry_type", "appeal_reason"]
+            "confidence", "llm_score", "style_score", "burst_score", "status", "entry_type", "appeal_reason"]
     return [dict(zip(keys, row)) for row in rows]
 
 
@@ -105,6 +110,85 @@ Respond with only the JSON object, no other text."""
         return 0.5, "Could not parse LLM response"
 
 
+def get_style_score(text):
+    sentences = re.split(r'[.!?]+', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    if len(sentences) < 2:
+        return 0.5
+
+    lengths = [len(s.split()) for s in sentences]
+    mean_len = sum(lengths) / len(lengths)
+    variance = sum((l - mean_len) ** 2 for l in lengths) / len(lengths)
+    normalized_variance = min(variance / 100.0, 1.0)
+    sentence_variance_score = 1.0 - normalized_variance
+
+    words = re.findall(r'\b\w+\b', text.lower())
+    if len(words) == 0:
+        return 0.5
+    ttr = len(set(words)) / len(words)
+    ttr_score = 1.0 - ttr
+
+    total_chars = len(text)
+    punct_count = sum(1 for c in text if c in '.,;:!?()[]{}"\'-')
+    punct_density = punct_count / total_chars if total_chars > 0 else 0
+    punct_score = 1.0 - min(punct_density * 10, 1.0)
+
+    style_score = (sentence_variance_score * 0.4) + (ttr_score * 0.4) + (punct_score * 0.2)
+    return round(max(0.0, min(1.0, style_score)), 4)
+
+
+def get_burst_score(text):
+    sentences = re.split(r'[.!?]+', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    if len(sentences) < 4:
+        return 0.5
+
+    chunk_size = max(2, len(sentences) // 3)
+    chunks = []
+    for i in range(0, len(sentences), chunk_size):
+        chunk = sentences[i:i + chunk_size]
+        if len(chunk) >= 2:
+            chunks.append(chunk)
+
+    if len(chunks) < 2:
+        return 0.5
+
+    chunk_variances = []
+    for chunk in chunks:
+        lengths = [len(s.split()) for s in chunk]
+        mean = sum(lengths) / len(lengths)
+        var = sum((l - mean) ** 2 for l in lengths) / len(lengths)
+        chunk_variances.append(var)
+
+    mean_var = sum(chunk_variances) / len(chunk_variances)
+    variance_of_variances = sum((v - mean_var) ** 2 for v in chunk_variances) / len(chunk_variances)
+
+    burst_score = 1.0 - min(variance_of_variances / 50.0, 1.0)
+    return round(max(0.0, min(1.0, burst_score)), 4)
+
+
+def get_confidence(llm_score, style_score, burst_score):
+    raw = (llm_score * 0.5) + (style_score * 0.3) + (burst_score * 0.2)
+
+    scores = [llm_score, style_score, burst_score]
+    max_diff = max(scores) - min(scores)
+    if max_diff > 0.4:
+        raw = raw + (0.5 - raw) * 0.1
+
+    return round(max(0.0, min(1.0, raw)), 4)
+
+
+def get_attribution(confidence):
+    if confidence >= 0.80:
+        return "likely_ai"
+    elif confidence <= 0.35:
+        return "likely_human"
+    else:
+        return "uncertain"
+
+
 @app.route("/submit", methods=["POST"])
 @limiter.limit("10 per minute")
 def submit():
@@ -118,18 +202,13 @@ def submit():
     content_id = str(uuid.uuid4())
 
     llm_score, llm_reason = get_llm_score(text)
+    style_score = get_style_score(text)
+    burst_score = get_burst_score(text)
 
-    confidence = llm_score
-
-    if confidence >= 0.80:
-        attribution = "likely_ai"
-    elif confidence <= 0.35:
-        attribution = "likely_human"
-    else:
-        attribution = "uncertain"
+    confidence = get_confidence(llm_score, style_score, burst_score)
+    attribution = get_attribution(confidence)
 
     label = "placeholder label"
-
     timestamp = datetime.now(timezone.utc).isoformat()
 
     write_log({
@@ -137,8 +216,10 @@ def submit():
         "creator_id": creator_id,
         "timestamp": timestamp,
         "attribution": attribution,
-        "confidence": round(confidence, 4),
+        "confidence": confidence,
         "llm_score": round(llm_score, 4),
+        "style_score": style_score,
+        "burst_score": burst_score,
         "status": "classified",
         "entry_type": "classification"
     })
@@ -146,8 +227,10 @@ def submit():
     return jsonify({
         "content_id": content_id,
         "attribution": attribution,
-        "confidence": round(confidence, 4),
+        "confidence": confidence,
         "llm_score": round(llm_score, 4),
+        "style_score": style_score,
+        "burst_score": burst_score,
         "llm_reason": llm_reason,
         "label": label,
         "status": "classified"
