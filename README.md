@@ -91,36 +91,39 @@ The thresholds work like this:
 
 The threshold for high confidence AI is set intentionally high. Calling a human creators work AI generated is a much worse mistake than missing an AI submission, so the system leans toward uncertain rather than flagging aggressively. A score has to be pretty convincingly AI-like across multiple signals before it gets that label.
 
-### Example: Lower Confidence (Uncertain)
+### Example 1: Lower Confidence (Leaning Human)
 
-Input: "The sun dipped below the horizon, painting the sky in hues of amber and rose. I sat on the porch, coffee in hand, watching the neighborhood slowly go quiet."
+Input: "ok so i finally tried that new ramen place downtown and honestly? underwhelming. the broth was fine but they put WAY too much sodium in it and i was thirsty for like three hours after. my friend got the spicy version and said it was better. probably wont go back unless someone drags me there"
 
 ```json
 {
   "llm_score": 0.2,
-  "style_score": 0.6039,
-  "burst_score": 0.5,
-  "confidence": 0.3931,
+  "style_score": 0.4427,
+  "burst_score": 1.0,
+  "confidence": 0.4395,
   "attribution": "uncertain"
 }
 ```
 
-The LLM correctly read this as human-like but the stylometric signal pushed it up because the sentences are fairly uniform in length and the vocabulary is not that diverse for a short poetic text. Combined it landed in uncertain, which is the right call when signals are disagreeing with each other.
+The LLM correctly read this as human-like and the style score was moderate, but the burst score hit 1.0 because casual writing like this has no consistent rhythm at all, it just jumps around. The combined confidence came out to 0.4395 which lands in uncertain but clearly on the human end of that range. The signals all pointed in the same direction here, the score just was not low enough to clear the likely human threshold.
 
-### Example: Higher Confidence (Trending AI)
+### Example 2: Higher Confidence (Leaning AI)
 
-Input: "Artificial intelligence represents a transformative paradigm shift in modern society. It is important to note that while the benefits of AI are numerous, it is equally essential to consider the ethical implications. Furthermore, stakeholders across various sectors must collaborate to ensure responsible deployment."
+Input: "In conclusion it is important to note that leveraging synergistic paradigms across multiple verticals enables organizations to optimize their core competencies. Furthermore by implementing data-driven methodologies and fostering cross-functional collaboration stakeholders can ensure sustainable growth and maximize return on investment through strategic alignment of key performance indicators."
 
 ```json
 {
-  "llm_score": 0.8,
-  "style_score": 0.4965,
+  "llm_score": 0.9,
+  "style_score": 0.5711,
   "burst_score": 0.5,
-  "confidence": 0.649
+  "confidence": 0.7213,
+  "attribution": "uncertain"
 }
 ```
 
-The LLM flagged it strongly but the style and burst scores were only moderate, so the combined confidence came out to 0.649 which lands in uncertain but clearly trending toward AI. To hit the high confidence AI label you really need all three signals pushing in the same direction.
+The LLM flagged this one strongly at 0.9 because the buzzword heavy corporate language is a pretty obvious pattern. Style and burst were moderate since it is only two sentences. Combined confidence came out to 0.7213, which is the highest score we saw across all our test inputs and sits right below the high confidence AI threshold. To cross 0.80 you really need the structural signals to agree with the LLM, which is hard to achieve with short texts even when the writing is obviously AI-like.
+
+The gap between these two examples (0.4395 vs 0.7213) shows the scoring produces meaningful variation across different types of input rather than clustering everything in the middle.
 
 ---
 
