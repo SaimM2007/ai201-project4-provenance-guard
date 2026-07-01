@@ -6,6 +6,12 @@ Built with Flask, Groq (llama-3.3-70b-versatile), and SQLite.
 
 ---
 
+## Walkthrough Video
+
+[Provenance Guard Demo / Walkthrough](https://www.loom.com/share/4feb00443bb341e78f31e46de4ae431c)
+
+---
+
 ## Architecture
 
 ```mermaid
